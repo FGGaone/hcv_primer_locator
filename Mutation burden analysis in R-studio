@@ -1,0 +1,271 @@
+# ============================================================================
+# Mutation Burden Analysis by Open-Reading Frame and Anti-HBc Status
+# ============================================================================
+# This script calculates the burden of mutations in all HBV ORFs
+# stratified by anti-HBc status (negative=1, positive=2, unknown=0)
+# ============================================================================
+
+# Load required libraries
+library(readxl)
+library(tidyverse)
+library(dplyr)
+
+# ============================================================================
+# 1. READ AND PREPARE DATA
+# ============================================================================
+
+# Read the Excel file
+df <- read_excel("ws_95.xlsx")
+
+# Check the structure
+head(df)
+summary(df)
+
+# ============================================================================
+# 2. FUNCTION TO COUNT MUTATIONS PER ORF
+# ============================================================================
+
+# Function to count number of mutations from comma-separated string
+count_mutations <- function(mutation_string) {
+  if (is.na(mutation_string) || mutation_string == "" || trimws(mutation_string) == "") {
+    return(0)
+  }
+  
+  # Count non-empty mutations separated by commas
+  mutations <- str_trim(unlist(strsplit(as.character(mutation_string), ",")))
+  mutations <- mutations[mutations != ""]
+  return(length(mutations))
+}
+
+# ============================================================================
+# 3. EXTRACT MUTATION COUNTS FOR EACH ORF
+# ============================================================================
+
+df_mutations <- df %>%
+  mutate(
+    # Count mutations in each ORF
+    count_sp = sapply(mutations_sp, count_mutations),
+    count_core = sapply(mutations_core, count_mutations),
+    count_shb = sapply(mutations_shb, count_mutations),
+    count_mhb = sapply(mutations_mhb, count_mutations),
+    count_lhb = sapply(mutations_lhb, count_mutations),
+    count_prec = sapply(mutations_prec, count_mutations),
+    count_rt = sapply(mutations_rt, count_mutations),
+    
+    # Create anti-HBc status labels
+    anti_hbc_label = case_when(
+      anti_hbc_status == 0 ~ "Unknown",
+      anti_hbc_status == 1 ~ "Negative",
+      anti_hbc_status == 2 ~ "Positive",
+      TRUE ~ "Unknown"
+    )
+  )
+
+# View the mutation counts
+head(df_mutations %>% select(id, anti_hbc_label, count_sp, count_core, count_shb, count_mhb, count_lhb, count_prec, count_rt))
+
+# ============================================================================
+# 4. CALCULATE MUTATION BURDEN STATISTICS BY ANTI-HBC STATUS
+# ============================================================================
+
+# Summary statistics by anti-HBc status for each ORF
+mutation_burden_summary <- df_mutations %>%
+  group_by(anti_hbc_label, anti_hbc_status) %>%
+  summarise(
+    # Surface protein (sp)
+    sp_mean = mean(count_sp, na.rm = TRUE),
+    sp_median = median(count_sp, na.rm = TRUE),
+    sp_sd = sd(count_sp, na.rm = TRUE),
+    sp_min = min(count_sp, na.rm = TRUE),
+    sp_max = max(count_sp, na.rm = TRUE),
+    sp_total = sum(count_sp, na.rm = TRUE),
+    
+    # Core
+    core_mean = mean(count_core, na.rm = TRUE),
+    core_median = median(count_core, na.rm = TRUE),
+    core_sd = sd(count_core, na.rm = TRUE),
+    core_min = min(count_core, na.rm = TRUE),
+    core_max = max(count_core, na.rm = TRUE),
+    core_total = sum(count_core, na.rm = TRUE),
+    
+    # Small HBsAg (shb)
+    shb_mean = mean(count_shb, na.rm = TRUE),
+    shb_median = median(count_shb, na.rm = TRUE),
+    shb_sd = sd(count_shb, na.rm = TRUE),
+    shb_min = min(count_shb, na.rm = TRUE),
+    shb_max = max(count_shb, na.rm = TRUE),
+    shb_total = sum(count_shb, na.rm = TRUE),
+    
+    # Middle HBsAg (mhb)
+    mhb_mean = mean(count_mhb, na.rm = TRUE),
+    mhb_median = median(count_mhb, na.rm = TRUE),
+    mhb_sd = sd(count_mhb, na.rm = TRUE),
+    mhb_min = min(count_mhb, na.rm = TRUE),
+    mhb_max = max(count_mhb, na.rm = TRUE),
+    mhb_total = sum(count_mhb, na.rm = TRUE),
+    
+    # Large HBsAg (lhb)
+    lhb_mean = mean(count_lhb, na.rm = TRUE),
+    lhb_median = median(count_lhb, na.rm = TRUE),
+    lhb_sd = sd(count_lhb, na.rm = TRUE),
+    lhb_min = min(count_lhb, na.rm = TRUE),
+    lhb_max = max(count_lhb, na.rm = TRUE),
+    lhb_total = sum(count_lhb, na.rm = TRUE),
+    
+    # Precore/Core promoter (prec)
+    prec_mean = mean(count_prec, na.rm = TRUE),
+    prec_median = median(count_prec, na.rm = TRUE),
+    prec_sd = sd(count_prec, na.rm = TRUE),
+    prec_min = min(count_prec, na.rm = TRUE),
+    prec_max = max(count_prec, na.rm = TRUE),
+    prec_total = sum(count_prec, na.rm = TRUE),
+    
+    # Reverse Transcriptase (rt)
+    rt_mean = mean(count_rt, na.rm = TRUE),
+    rt_median = median(count_rt, na.rm = TRUE),
+    rt_sd = sd(count_rt, na.rm = TRUE),
+    rt_min = min(count_rt, na.rm = TRUE),
+    rt_max = max(count_rt, na.rm = TRUE),
+    rt_total = sum(count_rt, na.rm = TRUE),
+    
+    # Sample size
+    n_samples = n(),
+    
+    .groups = 'drop'
+  )
+
+print("=== MUTATION BURDEN SUMMARY BY ANTI-HBC STATUS ===")
+print(mutation_burden_summary)
+
+# ============================================================================
+# 5. CREATE DETAILED SUMMARY TABLE (LONG FORMAT)
+# ============================================================================
+
+# Create a more readable summary table
+mutation_burden_long <- mutation_burden_summary %>%
+  pivot_longer(
+    cols = -c(anti_hbc_label, anti_hbc_status, n_samples),
+    names_to = c("orf", "metric"),
+    names_pattern = "^(.+?)_(.+)$",
+    values_to = "value"
+  ) %>%
+  pivot_wider(
+    names_from = metric,
+    values_from = value
+  ) %>%
+  arrange(orf, anti_hbc_status)
+
+print("\n=== MUTATION BURDEN BY ORF AND ANTI-HBC STATUS (LONG FORMAT) ===")
+print(mutation_burden_long)
+
+# ============================================================================
+# 6. EXPORT RESULTS TO CSV AND EXCEL
+# ============================================================================
+
+# Export summary statistics
+write.csv(mutation_burden_summary, 
+          "mutation_burden_summary.csv", 
+          row.names = FALSE)
+
+write.csv(mutation_burden_long, 
+          "mutation_burden_by_orf.csv", 
+          row.names = FALSE)
+
+# Also export the detailed data with mutation counts per sample
+write.csv(df_mutations, 
+          "mutation_counts_per_sample.csv", 
+          row.names = FALSE)
+
+print("\n✓ Results exported to CSV files:")
+print("  - mutation_burden_summary.csv")
+print("  - mutation_burden_by_orf.csv")
+print("  - mutation_counts_per_sample.csv")
+
+# ============================================================================
+# 7. VISUALIZATIONS (OPTIONAL)
+# ============================================================================
+
+# Create visualization of mutation burden by ORF and anti-HBc status
+if (require("ggplot2")) {
+  # Prepare data for plotting
+  plot_data <- df_mutations %>%
+    select(id, anti_hbc_label, count_sp, count_core, count_shb, count_mhb, count_lhb, count_prec, count_rt) %>%
+    pivot_longer(
+      cols = starts_with("count_"),
+      names_to = "orf",
+      names_prefix = "count_",
+      values_to = "mutation_count"
+    ) %>%
+    mutate(
+      orf = toupper(orf),
+      orf = factor(orf, levels = c("SP", "CORE", "SHB", "MHB", "LHB", "PREC", "RT"))
+    )
+  
+  # Box plot
+  p1 <- ggplot(plot_data, aes(x = orf, y = mutation_count, fill = anti_hbc_label)) +
+    geom_boxplot() +
+    labs(
+      title = "Distribution of Mutation Burden by ORF and Anti-HBc Status",
+      x = "Open Reading Frame",
+      y = "Number of Mutations",
+      fill = "Anti-HBc Status"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+  
+  ggsave("mutation_burden_boxplot.png", plot = p1, width = 10, height = 6)
+  
+  # Bar plot of mean mutations
+  p2 <- plot_data %>%
+    group_by(orf, anti_hbc_label) %>%
+    summarise(mean_mutations = mean(mutation_count, na.rm = TRUE), .groups = 'drop') %>%
+    ggplot(aes(x = orf, y = mean_mutations, fill = anti_hbc_label)) +
+    geom_col(position = "dodge") +
+    labs(
+      title = "Mean Mutation Burden by ORF and Anti-HBc Status",
+      x = "Open Reading Frame",
+      y = "Mean Number of Mutations",
+      fill = "Anti-HBc Status"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+  
+  ggsave("mutation_burden_barplot.png", plot = p2, width = 10, height = 6)
+  
+  print("\n✓ Visualizations saved:")
+  print("  - mutation_burden_boxplot.png")
+  print("  - mutation_burden_barplot.png")
+}
+
+# ============================================================================
+# 8. STATISTICAL TESTS (OPTIONAL)
+# ============================================================================
+
+# Kruskal-Wallis test to compare mutation burden across anti-HBc groups
+print("\n=== KRUSKAL-WALLIS TEST (p-values) ===")
+print("Testing if mutation burden differs significantly by anti-HBc status:")
+
+orfs <- c("count_sp", "count_core", "count_shb", "count_mhb", "count_lhb", "count_prec", "count_rt")
+orf_names <- c("SP", "CORE", "SHB", "MHB", "LHB", "PREC", "RT")
+
+kw_results <- data.frame(
+  ORF = orf_names,
+  p_value = NA,
+  stringsAsFactors = FALSE
+)
+
+for (i in seq_along(orfs)) {
+  kw_test <- kruskal.test(df_mutations[[orfs[i]]] ~ df_mutations$anti_hbc_label)
+  kw_results$p_value[i] <- kw_test$p.value
+}
+
+print(kw_results)
+
+print("\n✓ Analysis complete!")
+print("Results are ready for interpretation.")
