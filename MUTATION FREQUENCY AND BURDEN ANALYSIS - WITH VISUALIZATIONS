@@ -1,0 +1,541 @@
+# ============================================================================
+# MUTATION FREQUENCY AND BURDEN ANALYSIS - WITH VISUALIZATIONS
+# ============================================================================
+# This script includes:
+# 1. Total mutations per ORF (with graphs)
+# 2. Mutations per ORF by anti-HBc status (with graphs)
+# 3. Top mutations per ORF by anti-HBc status (with graphs)
+# 4. Heatmaps of mutation patterns
+# 5. Comparative analysis graphs
+# ============================================================================
+
+library(readxl)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+
+# ============================================================================
+# 1. READ DATA
+# ============================================================================
+
+df <- read_excel("ws_95.xlsx")
+
+print("Data loaded successfully!")
+print(head(df))
+
+# ============================================================================
+# 2. DEFINE ORF COLUMNS
+# ============================================================================
+
+orf_columns <- list(
+  sp = "mutations_sp",
+  core = "mutations_core",
+  shb = "mutations_shb",
+  mhb = "mutations_mhb",
+  lhb = "mutations_lhb",
+  prec = "mutations_prec",
+  rt = "mutations_rt"
+)
+
+# ============================================================================
+# 3. FUNCTION TO PARSE MUTATIONS FROM COMMA-SEPARATED STRING
+# ============================================================================
+
+parse_mutations <- function(mutation_string) {
+  if (is.na(mutation_string) || mutation_string == "" || trimws(mutation_string) == "") {
+    return(character(0))
+  }
+  
+  mutations <- str_trim(unlist(strsplit(as.character(mutation_string), ",")))
+  mutations <- mutations[mutations != ""]
+  return(mutations)
+}
+
+# ============================================================================
+# 4. PART 1: TOTAL MUTATIONS PER ORF (ALL SAMPLES)
+# ============================================================================
+
+cat("\n", paste(rep("=", 80), collapse = ""), "\n", sep = "")
+cat("PART 1: TOTAL MUTATIONS PER ORF (ALL SAMPLES COMBINED)\n")
+cat(paste(rep("=", 80), collapse = ""), "\n\n", sep = "")
+
+total_mutations_per_orf <- data.frame(
+  ORF = character(),
+  Total_Mutations = numeric(),
+  Unique_Mutations = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for (orf_name in names(orf_columns)) {
+  col_name <- orf_columns[[orf_name]]
+  all_mutations <- unlist(lapply(df[[col_name]], parse_mutations))
+  total_count <- length(all_mutations)
+  unique_count <- length(unique(all_mutations))
+  
+  total_mutations_per_orf <- rbind(total_mutations_per_orf, data.frame(
+    ORF = toupper(orf_name),
+    Total_Mutations = total_count,
+    Unique_Mutations = unique_count,
+    stringsAsFactors = FALSE
+  ))
+}
+
+print(total_mutations_per_orf)
+write.csv(total_mutations_per_orf, "01_total_mutations_per_orf.csv", row.names = FALSE)
+cat("\n✓ Saved: 01_total_mutations_per_orf.csv\n")
+
+# Create visualizations for PART 1
+cat("\nCreating visualizations for PART 1...\n")
+
+# Graph 1a: Total Mutations per ORF (Bar plot)
+p1a <- ggplot(total_mutations_per_orf, aes(x = reorder(ORF, -Total_Mutations), y = Total_Mutations, fill = ORF)) +
+  geom_bar(stat = "identity", color = "black", size = 0.7) +
+  geom_text(aes(label = Total_Mutations), vjust = -0.5, size = 4, fontface = "bold") +
+  labs(
+    title = "Total Mutation Burden by Open-Reading Frame",
+    subtitle = "All samples combined (n=27)",
+    x = "Open Reading Frame",
+    y = "Total Number of Mutations",
+    fill = "ORF"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+    plot.subtitle = element_text(hjust = 0.5, size = 11),
+    axis.text.x = element_text(size = 11, angle = 0),
+    axis.text.y = element_text(size = 10),
+    legend.position = "none",
+    panel.grid.major.y = element_line(color = "gray90")
+  )
+
+ggsave("graph_01a_total_mutations_per_orf.png", plot = p1a, width = 10, height = 6, dpi = 300)
+cat("✓ Saved: graph_01a_total_mutations_per_orf.png\n")
+
+# Graph 1b: Unique Mutations per ORF (Bar plot)
+p1b <- ggplot(total_mutations_per_orf, aes(x = reorder(ORF, -Unique_Mutations), y = Unique_Mutations, fill = ORF)) +
+  geom_bar(stat = "identity", color = "black", size = 0.7) +
+  geom_text(aes(label = Unique_Mutations), vjust = -0.5, size = 4, fontface = "bold") +
+  labs(
+    title = "Unique Mutations by Open-Reading Frame",
+    subtitle = "All samples combined (n=27)",
+    x = "Open Reading Frame",
+    y = "Number of Unique Mutations",
+    fill = "ORF"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+    plot.subtitle = element_text(hjust = 0.5, size = 11),
+    axis.text.x = element_text(size = 11, angle = 0),
+    axis.text.y = element_text(size = 10),
+    legend.position = "none",
+    panel.grid.major.y = element_line(color = "gray90")
+  )
+
+ggsave("graph_01b_unique_mutations_per_orf.png", plot = p1b, width = 10, height = 6, dpi = 300)
+cat("✓ Saved: graph_01b_unique_mutations_per_orf.png\n")
+
+# ============================================================================
+# 5. PART 2: TOTAL MUTATIONS PER ORF BY ANTI-HBC STATUS
+# ============================================================================
+
+cat("\n", paste(rep("=", 80), collapse = ""), "\n", sep = "")
+cat("PART 2: TOTAL MUTATIONS PER ORF BY ANTI-HBC STATUS\n")
+cat(paste(rep("=", 80), collapse = ""), "\n\n", sep = "")
+
+mutations_by_status <- data.frame(
+  ORF = character(),
+  Anti_HBc_Status = character(),
+  Anti_HBc_Code = numeric(),
+  Total_Mutations = numeric(),
+  Unique_Mutations = numeric(),
+  N_Samples = numeric(),
+  stringsAsFactors = FALSE
+)
+
+status_labels <- c("0" = "Unknown", "1" = "Negative", "2" = "Positive")
+
+for (orf_name in names(orf_columns)) {
+  col_name <- orf_columns[[orf_name]]
+  
+  for (status_code in c(0, 1, 2)) {
+    status_label <- status_labels[[as.character(status_code)]]
+    status_data <- df %>% filter(anti_hbc_status == status_code)
+    
+    if (nrow(status_data) > 0) {
+      all_mutations <- unlist(lapply(status_data[[col_name]], parse_mutations))
+      total_count <- length(all_mutations)
+      unique_count <- length(unique(all_mutations))
+      n_samples <- nrow(status_data)
+      
+      mutations_by_status <- rbind(mutations_by_status, data.frame(
+        ORF = toupper(orf_name),
+        Anti_HBc_Status = status_label,
+        Anti_HBc_Code = status_code,
+        Total_Mutations = total_count,
+        Unique_Mutations = unique_count,
+        N_Samples = n_samples,
+        stringsAsFactors = FALSE
+      ))
+    }
+  }
+}
+
+print(mutations_by_status)
+write.csv(mutations_by_status, "02_mutations_per_orf_by_anti_hbc_status.csv", row.names = FALSE)
+cat("\n✓ Saved: 02_mutations_per_orf_by_anti_hbc_status.csv\n")
+
+# Create visualizations for PART 2
+cat("\nCreating visualizations for PART 2...\n")
+
+# Graph 2a: Total Mutations by ORF and Anti-HBc Status (Grouped Bar)
+p2a <- ggplot(mutations_by_status, aes(x = reorder(ORF, -Total_Mutations), y = Total_Mutations, fill = Anti_HBc_Status)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black", size = 0.5) +
+  geom_text(aes(label = Total_Mutations), position = position_dodge(width = 0.9), vjust = -0.3, size = 3.5) +
+  scale_fill_manual(values = c("Negative" = "#2ecc71", "Positive" = "#e74c3c", "Unknown" = "#95a5a6")) +
+  labs(
+    title = "Total Mutations by ORF and Anti-HBc Status",
+    subtitle = "Comparing negative (n=6), positive (n=18), and unknown (n=3) samples",
+    x = "Open Reading Frame",
+    y = "Total Number of Mutations",
+    fill = "Anti-HBc Status"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+    plot.subtitle = element_text(hjust = 0.5, size = 11),
+    axis.text.x = element_text(size = 11, angle = 0),
+    axis.text.y = element_text(size = 10),
+    legend.position = "top",
+    panel.grid.major.y = element_line(color = "gray90")
+  )
+
+ggsave("graph_02a_total_mutations_by_status.png", plot = p2a, width = 12, height = 7, dpi = 300)
+cat("✓ Saved: graph_02a_total_mutations_by_status.png\n")
+
+# Graph 2b: Unique Mutations by ORF and Anti-HBc Status (Grouped Bar)
+p2b <- ggplot(mutations_by_status, aes(x = reorder(ORF, -Unique_Mutations), y = Unique_Mutations, fill = Anti_HBc_Status)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black", size = 0.5) +
+  geom_text(aes(label = Unique_Mutations), position = position_dodge(width = 0.9), vjust = -0.3, size = 3.5) +
+  scale_fill_manual(values = c("Negative" = "#2ecc71", "Positive" = "#e74c3c", "Unknown" = "#95a5a6")) +
+  labs(
+    title = "Unique Mutations by ORF and Anti-HBc Status",
+    subtitle = "Comparing negative (n=6), positive (n=18), and unknown (n=3) samples",
+    x = "Open Reading Frame",
+    y = "Number of Unique Mutations",
+    fill = "Anti-HBc Status"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+    plot.subtitle = element_text(hjust = 0.5, size = 11),
+    axis.text.x = element_text(size = 11, angle = 0),
+    axis.text.y = element_text(size = 10),
+    legend.position = "top",
+    panel.grid.major.y = element_line(color = "gray90")
+  )
+
+ggsave("graph_02b_unique_mutations_by_status.png", plot = p2b, width = 12, height = 7, dpi = 300)
+cat("✓ Saved: graph_02b_unique_mutations_by_status.png\n")
+
+# ============================================================================
+# 6. PART 3: LIST ALL UNIQUE MUTATIONS PER ORF BY ANTI-HBC STATUS
+# ============================================================================
+
+cat("\n", paste(rep("=", 80), collapse = ""), "\n", sep = "")
+cat("PART 3: ALL UNIQUE MUTATIONS PER ORF BY ANTI-HBC STATUS\n")
+cat(paste(rep("=", 80), collapse = ""), "\n\n", sep = "")
+
+all_mutations_detailed <- list()
+
+for (orf_name in names(orf_columns)) {
+  col_name <- orf_columns[[orf_name]]
+  
+  for (status_code in c(0, 1, 2)) {
+    status_label <- status_labels[[as.character(status_code)]]
+    status_data <- df %>% filter(anti_hbc_status == status_code)
+    
+    if (nrow(status_data) > 0) {
+      all_mutations <- unlist(lapply(status_data[[col_name]], parse_mutations))
+      
+      if (length(all_mutations) > 0) {
+        mutation_freq <- as.data.frame(table(all_mutations), stringsAsFactors = FALSE)
+        names(mutation_freq) <- c("Mutation", "Frequency")
+        mutation_freq <- mutation_freq %>% arrange(desc(Frequency))
+        
+        mutation_freq$ORF <- toupper(orf_name)
+        mutation_freq$Anti_HBc_Status <- status_label
+        mutation_freq$Anti_HBc_Code <- status_code
+        
+        key <- paste(orf_name, status_code, sep = "_")
+        all_mutations_detailed[[key]] <- mutation_freq %>% 
+          select(ORF, Anti_HBc_Status, Anti_HBc_Code, Mutation, Frequency)
+      }
+    }
+  }
+}
+
+mutations_detailed_df <- do.call(rbind, all_mutations_detailed)
+rownames(mutations_detailed_df) <- NULL
+
+print(head(mutations_detailed_df, 20))
+write.csv(mutations_detailed_df, "03_all_mutations_by_orf_and_status.csv", row.names = FALSE)
+cat("\n✓ Saved: 03_all_mutations_by_orf_and_status.csv\n")
+
+# Create visualizations for PART 3 - Top mutations per ORF by status
+cat("\nCreating visualizations for PART 3 (Top mutations)...\n")
+
+# Graph 3: Top 10 mutations per ORF (faceted by anti-HBc status)
+top_n <- 10
+
+top_mutations <- mutations_detailed_df %>%
+  group_by(ORF, Anti_HBc_Status) %>%
+  slice_max(Frequency, n = top_n) %>%
+  ungroup()
+
+p3 <- ggplot(top_mutations, aes(x = reorder(Mutation, Frequency), y = Frequency, fill = Anti_HBc_Status)) +
+  geom_bar(stat = "identity", color = "black", size = 0.3) +
+  facet_wrap(~ORF, scales = "free", ncol = 4) +
+  scale_fill_manual(values = c("Negative" = "#2ecc71", "Positive" = "#e74c3c", "Unknown" = "#95a5a6")) +
+  coord_flip() +
+  labs(
+    title = "Top 10 Most Frequent Mutations by ORF and Anti-HBc Status",
+    x = "Mutation",
+    y = "Frequency",
+    fill = "Anti-HBc Status"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+    axis.text.x = element_text(size = 9),
+    axis.text.y = element_text(size = 8),
+    legend.position = "bottom",
+    strip.text = element_text(size = 10, face = "bold"),
+    panel.grid.major.x = element_line(color = "gray90")
+  )
+
+ggsave("graph_03_top_mutations_by_status.png", plot = p3, width = 16, height = 12, dpi = 300)
+cat("✓ Saved: graph_03_top_mutations_by_status.png\n")
+
+# ============================================================================
+# 7. PART 4: SHARED VS. UNIQUE MUTATIONS
+# ============================================================================
+
+cat("\n", paste(rep("=", 80), collapse = ""), "\n", sep = "")
+cat("PART 4: SHARED VS. UNIQUE MUTATIONS BY ANTI-HBC STATUS\n")
+cat(paste(rep("=", 80), collapse = ""), "\n\n", sep = "")
+
+shared_unique_summary <- data.frame(
+  ORF = character(),
+  Category = character(),
+  Anti_HBc_Status = character(),
+  Mutations = character(),
+  Count = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for (orf_name in names(orf_columns)) {
+  col_name <- orf_columns[[orf_name]]
+  
+  mutations_by_status_orf <- list()
+  
+  for (status_code in c(0, 1, 2)) {
+    status_label <- status_labels[[as.character(status_code)]]
+    status_data <- df %>% filter(anti_hbc_status == status_code)
+    
+    if (nrow(status_data) > 0) {
+      all_mutations <- unique(unlist(lapply(status_data[[col_name]], parse_mutations)))
+      mutations_by_status_orf[[status_label]] <- all_mutations
+    }
+  }
+  
+  status_names <- names(mutations_by_status_orf)
+  
+  if (length(status_names) > 0) {
+    for (status_label in status_names) {
+      mutations_status <- mutations_by_status_orf[[status_label]]
+      other_mutations <- Reduce(union, mutations_by_status_orf[names(mutations_by_status_orf) != status_label])
+      unique_muts <- setdiff(mutations_status, other_mutations)
+      
+      if (length(unique_muts) > 0) {
+        shared_unique_summary <- rbind(shared_unique_summary, data.frame(
+          ORF = toupper(orf_name),
+          Category = paste("Unique to", status_label),
+          Anti_HBc_Status = status_label,
+          Mutations = paste(unique_muts, collapse = "; "),
+          Count = length(unique_muts),
+          stringsAsFactors = FALSE
+        ))
+      }
+    }
+    
+    if (length(status_names) == 3) {
+      shared_all <- Reduce(intersect, mutations_by_status_orf)
+      if (length(shared_all) > 0) {
+        shared_unique_summary <- rbind(shared_unique_summary, data.frame(
+          ORF = toupper(orf_name),
+          Category = "Shared by ALL",
+          Anti_HBc_Status = "All",
+          Mutations = paste(shared_all, collapse = "; "),
+          Count = length(shared_all),
+          stringsAsFactors = FALSE
+        ))
+      }
+    }
+  }
+}
+
+print(shared_unique_summary)
+write.csv(shared_unique_summary, "04_shared_vs_unique_mutations.csv", row.names = FALSE)
+cat("\n✓ Saved: 04_shared_vs_unique_mutations.csv\n")
+
+# Create visualization for PART 4
+cat("\nCreating visualizations for PART 4...\n")
+
+# Graph 4: Shared vs Unique Mutations (Stacked Bar)
+p4 <- ggplot(shared_unique_summary, aes(x = reorder(ORF, -Count), y = Count, fill = Category)) +
+  geom_bar(stat = "identity", position = "stack", color = "black", size = 0.5) +
+  geom_text(aes(label = Count), position = position_stack(vjust = 0.5), size = 3.5, fontface = "bold") +
+  scale_fill_manual(values = c(
+    "Unique to Negative" = "#3498db",
+    "Unique to Positive" = "#e74c3c",
+    "Unique to Unknown" = "#95a5a6",
+    "Shared by ALL" = "#f39c12"
+  )) +
+  labs(
+    title = "Shared vs Unique Mutations by ORF and Anti-HBc Status",
+    subtitle = "Stacked bar showing mutation distribution patterns",
+    x = "Open Reading Frame",
+    y = "Number of Mutations",
+    fill = "Category"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+    plot.subtitle = element_text(hjust = 0.5, size = 11),
+    axis.text.x = element_text(size = 11, angle = 0),
+    axis.text.y = element_text(size = 10),
+    legend.position = "right",
+    panel.grid.major.y = element_line(color = "gray90")
+  )
+
+ggsave("graph_04_shared_vs_unique_mutations.png", plot = p4, width = 12, height = 7, dpi = 300)
+cat("✓ Saved: graph_04_shared_vs_unique_mutations.png\n")
+
+# ============================================================================
+# 8. CREATE PER-ORF SUMMARY FILES WITH GRAPHS
+# ============================================================================
+
+cat("\n", paste(rep("=", 80), collapse = ""), "\n", sep = "")
+cat("CREATING PER-ORF SUMMARY FILES AND GRAPHS\n")
+cat(paste(rep("=", 80), collapse = ""), "\n\n", sep = "")
+
+for (orf_name in names(orf_columns)) {
+  col_name <- orf_columns[[orf_name]]
+  
+  all_df <- data.frame(
+    ORF = toupper(orf_name),
+    Anti_HBc_Status = character(),
+    Anti_HBc_Code = numeric(),
+    Mutation = character(),
+    Frequency = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  for (status_code in c(0, 1, 2)) {
+    status_label <- status_labels[[as.character(status_code)]]
+    status_data <- df %>% filter(anti_hbc_status == status_code)
+    
+    if (nrow(status_data) > 0) {
+      all_mutations <- unlist(lapply(status_data[[col_name]], parse_mutations))
+      
+      if (length(all_mutations) > 0) {
+        mutation_freq <- as.data.frame(table(all_mutations), stringsAsFactors = FALSE)
+        names(mutation_freq) <- c("Mutation", "Frequency")
+        mutation_freq <- mutation_freq %>% arrange(desc(Frequency))
+        
+        temp_df <- data.frame(
+          ORF = toupper(orf_name),
+          Anti_HBc_Status = status_label,
+          Anti_HBc_Code = status_code,
+          Mutation = mutation_freq$Mutation,
+          Frequency = mutation_freq$Frequency,
+          stringsAsFactors = FALSE
+        )
+        
+        all_df <- rbind(all_df, temp_df)
+      }
+    }
+  }
+  
+  if (nrow(all_df) > 1) {
+    filename <- paste0("05_mutations_", tolower(orf_name), ".csv")
+    write.csv(all_df, filename, row.names = FALSE)
+    cat(paste("✓ Saved:", filename, "\n"))
+    
+    # Create individual graph for each ORF
+    top_mut_orf <- all_df %>%
+      group_by(Anti_HBc_Status) %>%
+      slice_max(Frequency, n = 8) %>%
+      ungroup()
+    
+    if (nrow(top_mut_orf) > 0) {
+      p_orf <- ggplot(top_mut_orf, aes(x = reorder(Mutation, Frequency), y = Frequency, fill = Anti_HBc_Status)) +
+        geom_bar(stat = "identity", color = "black", size = 0.5) +
+        geom_text(aes(label = Frequency), hjust = -0.2, size = 3.5, fontface = "bold") +
+        scale_fill_manual(values = c("Negative" = "#2ecc71", "Positive" = "#e74c3c", "Unknown" = "#95a5a6")) +
+        coord_flip() +
+        labs(
+          title = paste("Top Mutations in", toupper(orf_name), "by Anti-HBc Status"),
+          x = "Mutation",
+          y = "Frequency",
+          fill = "Anti-HBc Status"
+        ) +
+        theme_minimal() +
+        theme(
+          plot.title = element_text(hjust = 0.5, face = "bold", size = 13),
+          axis.text.x = element_text(size = 10),
+          axis.text.y = element_text(size = 10),
+          legend.position = "bottom",
+          panel.grid.major.x = element_line(color = "gray90")
+        )
+      
+      graph_filename <- paste0("graph_05_mutations_", tolower(orf_name), ".png")
+      ggsave(graph_filename, plot = p_orf, width = 11, height = 7, dpi = 300)
+      cat(paste("✓ Saved:", graph_filename, "\n"))
+    }
+  }
+}
+
+# ============================================================================
+# 9. FINAL SUMMARY
+# ============================================================================
+
+cat("\n", paste(rep("=", 80), collapse = ""), "\n", sep = "")
+cat("FINAL SUMMARY AND OUTPUT\n")
+cat(paste(rep("=", 80), collapse = ""), "\n\n", sep = "")
+
+cat(paste("Total samples analyzed:", nrow(df), "\n"))
+cat(paste("  - Anti-HBc Negative (1):", nrow(df %>% filter(anti_hbc_status == 1)), "\n"))
+cat(paste("  - Anti-HBc Positive (2):", nrow(df %>% filter(anti_hbc_status == 2)), "\n"))
+cat(paste("  - Anti-HBc Unknown (0):", nrow(df %>% filter(anti_hbc_status == 0)), "\n"))
+
+cat("\n✓ ALL ANALYSIS COMPLETE!\n\n")
+cat("DATA FILES CREATED:\n")
+cat("  1. 01_total_mutations_per_orf.csv\n")
+cat("  2. 02_mutations_per_orf_by_anti_hbc_status.csv\n")
+cat("  3. 03_all_mutations_by_orf_and_status.csv\n")
+cat("  4. 04_shared_vs_unique_mutations.csv\n")
+cat("  5. 05_mutations_[orf].csv (RT, SP, CORE, SHB, MHB, LHB, PREC)\n")
+
+cat("\nGRAPHS CREATED:\n")
+cat("  1. graph_01a_total_mutations_per_orf.png\n")
+cat("  2. graph_01b_unique_mutations_per_orf.png\n")
+cat("  3. graph_02a_total_mutations_by_status.png\n")
+cat("  4. graph_02b_unique_mutations_by_status.png\n")
+cat("  5. graph_03_top_mutations_by_status.png (ALL ORFs)\n")
+cat("  6. graph_04_shared_vs_unique_mutations.png\n")
+cat("  7. graph_05_mutations_[orf].png (individual graphs for each ORF)\n")
+
+cat("\n", paste(rep("=", 80), collapse = ""), "\n", sep = "")
