@@ -1,0 +1,308 @@
+# ============================================================
+#  Phylogenetic Tree from Binary Mutation Matrix
+#  NJ Tree with Genotype & Anti-HBc Status Annotations
+# ============================================================
+
+# ---- 1. Install & Load Required Packages -------------------
+required_packages <- c("ape", "phangorn", "ggplot2", "ggtree",
+                        "dplyr", "tidyr", "RColorBrewer", "viridis")
+
+for (pkg in required_packages) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    if (pkg %in% c("ggtree")) {
+      if (!requireNamespace("BiocManager", quietly = TRUE))
+        install.packages("BiocManager")
+      BiocManager::install(pkg)
+    } else {
+      install.packages(pkg)
+    }
+  }
+  library(pkg, character.only = TRUE)
+}
+
+# ============================================================
+# ---- 2. Define Sample Metadata ----------------------------
+# ============================================================
+# Replace this section with your actual data.
+# Each row = one sample; columns = SampleID, Genotype, AntiHBc
+
+metadata <- data.frame(
+  SampleID  = paste0("S", sprintf("%02d", 1:20)),
+  Genotype  = sample(c("A", "B", "C", "D"), 20, replace = TRUE,
+                     prob = c(0.3, 0.3, 0.2, 0.2)),
+  AntiHBc   = sample(c("Positive", "Negative"), 20, replace = TRUE,
+                     prob = c(0.6, 0.4)),
+  stringsAsFactors = FALSE
+)
+
+# ============================================================
+# ---- 3. Simulate / Load Binary Mutation Matrix ------------
+# ============================================================
+# Rows = Samples | Columns = Mutation Sites
+# 1 = mutation present | 0 = mutation absent
+#
+# TO USE YOUR OWN DATA:
+#   mutation_matrix <- read.csv("your_mutation_matrix.csv",
+#                                row.names = 1)
+#   mutation_matrix <- as.matrix(mutation_matrix)
+
+set.seed(42)
+n_samples   <- nrow(metadata)
+n_mutations <- 80   # number of mutation sites
+
+mutation_matrix <- matrix(0, nrow = n_samples, ncol = n_mutations,
+                           dimnames = list(metadata$SampleID,
+                                           paste0("Mut_", 1:n_mutations)))
+
+# Simulate biologically meaningful clustering by genotype
+genotype_levels <- unique(metadata$Genotype)
+genotype_core_muts <- list(
+  A = 1:20,
+  B = 15:35,
+  C = 30:50,
+  D = 45:65
+)
+
+for (i in seq_len(n_samples)) {
+  gt     <- metadata$Genotype[i]
+  core   <- genotype_core_muts[[gt]]
+  # Core mutations for genotype (high probability)
+  mutation_matrix[i, core] <- rbinom(length(core), 1, prob = 0.75)
+  # Background noise (low probability)
+  non_core <- setdiff(1:n_mutations, core)
+  mutation_matrix[i, non_core] <- rbinom(length(non_core), 1, prob = 0.10)
+}
+
+cat("Binary Mutation Matrix Dimensions:", dim(mutation_matrix), "\n")
+cat("Samples:", nrow(mutation_matrix), "| Mutation Sites:", ncol(mutation_matrix), "\n\n")
+
+# ============================================================
+# ---- 4. Calculate Genetic Distances -----------------------
+# ============================================================
+# Using binary (asymmetric) distance via dist() with method="binary"
+# This is equivalent to the proportion of sites that differ
+# (Jaccard-based dissimilarity on presence/absence data)
+
+dist_matrix <- dist(mutation_matrix, method = "binary")
+
+cat("Distance Matrix Summary:\n")
+print(summary(as.vector(dist_matrix)))
+cat("\n")
+
+# ============================================================
+# ---- 5. Construct Neighbor-Joining Tree -------------------
+# ============================================================
+nj_tree <- nj(dist_matrix)
+
+# Root the tree at midpoint for better visualization
+nj_tree_rooted <- midpoint(nj_tree)
+
+cat("NJ Tree Summary:\n")
+print(nj_tree_rooted)
+cat("\n")
+
+# ============================================================
+# ---- 6. Prepare Annotation Data ---------------------------
+# ============================================================
+tip_data <- metadata %>%
+  rename(label = SampleID) %>%
+  mutate(
+    Genotype  = factor(Genotype,  levels = sort(unique(Genotype))),
+    AntiHBc   = factor(AntiHBc,   levels = c("Positive", "Negative"))
+  )
+
+# ============================================================
+# ---- 7. Build the ggtree Visualization --------------------
+# ============================================================
+
+# Color palettes
+genotype_colors <- c(
+  "A" = "#E63946",
+  "B" = "#457B9D",
+  "C" = "#2A9D8F",
+  "D" = "#E9C46A"
+)
+
+antihbc_colors <- c(
+  "Positive" = "#6A0572",
+  "Negative" = "#CCCCCC"
+)
+
+antihbc_shapes <- c(
+  "Positive" = 16,   # filled circle
+  "Negative" = 1     # open circle
+)
+
+# ---- Main Tree Plot ----------------------------------------
+p_tree <- ggtree(nj_tree_rooted, layout = "rectangular",
+                  color = "#444444", size = 0.5) %<+% tip_data +
+
+  # ---- Branch length scale bar
+  geom_treescale(x        = 0,
+                 y        = -1,
+                 fontsize = 3,
+                 linesize = 0.8,
+                 color    = "#333333",
+                 label    = "Genetic Distance") +
+
+  # ---- Tip points colored by Genotype, shaped by AntiHBc
+  geom_tippoint(aes(color = Genotype, shape = AntiHBc),
+                size   = 3.5,
+                stroke = 1.2) +
+
+  # ---- Tip labels
+  geom_tiplab(aes(label = label),
+              size      = 2.8,
+              hjust     = -0.15,
+              fontface  = "bold",
+              color     = "#222222") +
+
+  # ---- Color & shape scales
+  scale_color_manual(
+    name   = "HBV Genotype",
+    values = genotype_colors,
+    guide  = guide_legend(order = 1,
+                          override.aes = list(size = 5, shape = 16))
+  ) +
+  scale_shape_manual(
+    name   = "Anti-HBc Status",
+    values = antihbc_shapes,
+    guide  = guide_legend(order = 2,
+                          override.aes = list(size = 5, color = "#555555"))
+  ) +
+
+  # ---- Title & labels
+  labs(
+    title    = "Neighbor-Joining Phylogenetic Tree",
+    subtitle = "Based on Binary Mutation Matrix | Midpoint Rooted",
+    caption  = paste0(
+      "Samples: ", n_samples,
+      "  |  Mutation Sites: ", n_mutations,
+      "  |  Distance Method: Binary (Jaccard)"
+    )
+  ) +
+
+  # ---- Theme
+  theme_tree2() +
+  theme(
+    plot.title       = element_text(size = 16, face = "bold",   hjust = 0.5,
+                                    color = "#111111", margin = margin(b = 4)),
+    plot.subtitle    = element_text(size = 11, face = "italic", hjust = 0.5,
+                                    color = "#555555", margin = margin(b = 6)),
+    plot.caption     = element_text(size =  8, color = "#888888", hjust = 0.5),
+    legend.position  = "right",
+    legend.title     = element_text(face = "bold", size = 10),
+    legend.text      = element_text(size =  9),
+    legend.key       = element_rect(fill = "transparent"),
+    plot.background  = element_rect(fill = "#FAFAFA", color = NA),
+    panel.background = element_rect(fill = "#FAFAFA", color = NA),
+    plot.margin      = margin(20, 60, 20, 20)
+  )
+
+print(p_tree)
+
+# ============================================================
+# ---- 8. Circular / Fan Layout Alternative -----------------
+# ============================================================
+p_circular <- ggtree(nj_tree_rooted, layout = "circular",
+                      color = "#555555", size = 0.45) %<+% tip_data +
+
+  geom_tippoint(aes(color = Genotype, shape = AntiHBc),
+                size   = 3.5,
+                stroke = 1.2) +
+
+  geom_tiplab(aes(label = label),
+              size  = 2.5,
+              hjust = -0.1,
+              color = "#222222") +
+
+  scale_color_manual(name   = "HBV Genotype",
+                     values = genotype_colors) +
+  scale_shape_manual(name   = "Anti-HBc Status",
+                     values = antihbc_shapes) +
+
+  labs(title    = "Circular NJ Phylogenetic Tree",
+       subtitle = "Binary Mutation Matrix | Midpoint Rooted") +
+
+  theme_tree() +
+  theme(
+    plot.title      = element_text(size = 14, face = "bold",   hjust = 0.5),
+    plot.subtitle   = element_text(size = 10, face = "italic", hjust = 0.5,
+                                   color = "#666666"),
+    legend.position = "right",
+    legend.title    = element_text(face = "bold"),
+    plot.background = element_rect(fill = "#FAFAFA", color = NA)
+  )
+
+print(p_circular)
+
+# ============================================================
+# ---- 9. Bootstrap Support (Optional but Recommended) ------
+# ============================================================
+# Performs 100 bootstrap replicates using phangorn
+cat("Running bootstrap analysis (100 replicates)...\n")
+
+phyDat_matrix <- phyDat(mutation_matrix, type = "USER",
+                         levels = c(0, 1))
+
+# Bootstrap function wrapper
+bs_nj <- function(x) nj(dist(as.matrix(x), method = "binary"))
+
+bs_result <- bootstrap.phyDat(
+  phyDat_matrix,
+  FUN    = bs_nj,
+  bs     = 100
+)
+
+# Map bootstrap values onto the tree
+nj_bs_tree <- plotBS(
+  midpoint(nj_tree),
+  bs_result,
+  p       = 50,     # only show values >= 50%
+  type    = "phylogram",
+  bs.col  = "#CC4A1B",
+  bs.adj  = c(1.1, -0.4),
+  cex     = 0.75,
+  main    = "NJ Tree with Bootstrap Support (>= 50%)"
+)
+
+cat("Bootstrap analysis complete.\n\n")
+
+# ============================================================
+# ---- 10. Export Results -----------------------------------
+# ============================================================
+
+# Save tree in Newick format
+write.tree(nj_tree_rooted, file = "nj_phylo_tree.nwk")
+cat("Newick tree saved to: nj_phylo_tree.nwk\n")
+
+# Save rectangular plot
+ggsave("nj_tree_rectangular.png", plot = p_tree,
+       width = 12, height = 10, dpi = 300, bg = "#FAFAFA")
+cat("Rectangular tree plot saved to: nj_tree_rectangular.png\n")
+
+# Save circular plot
+ggsave("nj_tree_circular.png", plot = p_circular,
+       width = 12, height = 12, dpi = 300, bg = "#FAFAFA")
+cat("Circular tree plot saved to: nj_tree_circular.png\n")
+
+# Save metadata
+write.csv(metadata, "sample_metadata.csv", row.names = FALSE)
+cat("Sample metadata saved to: sample_metadata.csv\n")
+
+# ============================================================
+# ---- 11. Summary Statistics --------------------------------
+# ============================================================
+cat("\n==== Summary Statistics ====\n")
+cat("Total Samples         :", n_samples, "\n")
+cat("Mutation Sites        :", n_mutations, "\n")
+cat("Mean Genetic Distance :", round(mean(as.vector(dist_matrix)), 4), "\n")
+cat("Max  Genetic Distance :", round(max(as.vector(dist_matrix)),  4), "\n")
+cat("Min  Genetic Distance :", round(min(as.vector(dist_matrix[dist_matrix > 0])), 4), "\n")
+cat("\nGenotype Distribution:\n")
+print(table(metadata$Genotype))
+cat("\nAnti-HBc Status Distribution:\n")
+print(table(metadata$AntiHBc))
+cat("\nTree is rooted:", is.rooted(nj_tree_rooted), "\n")
+cat("Number of tips:", Ntip(nj_tree_rooted), "\n")
+cat("Number of nodes:", Nnode(nj_tree_rooted), "\n")
